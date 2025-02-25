@@ -1,4 +1,4 @@
-#include "qubed.h"
+#include "editor.h"
 #include <asm-generic/ioctls.h>
 #include <errno.h>
 #include <stdio.h>
@@ -10,22 +10,11 @@
 
 struct editor_config E;
 
-int main(void) {
-  enable_raw_mode();
-  init_editor();
-
-  while (1) {
-    editor_refresh_screen();
-    editor_process_keypress();
-  }
-
-  return 0;
-}
-
 /**
  *
  */
 void init_editor() {
+  E.mode = MODE_NORMAL;
   E.cx = 0;
   E.cy = 0;
 
@@ -36,19 +25,35 @@ void init_editor() {
 /**
  *
  */
-void editor_move_cursor(char key) {
+void editor_move_cursor(int key) {
   switch (key) {
+
+  case ARROW_LEFT:
   case 'h':
-    E.cx--;
+    if (E.cx != 0) {
+      E.cx--;
+    }
     break;
+
+  case ARROW_RIGHT:
   case 'l':
-    E.cx++;
+    if (E.cx != E.screen_cols - 1) {
+      E.cx++;
+    }
     break;
+
+  case ARROW_UP:
   case 'k':
-    E.cy--;
+    if (E.cy != 0) {
+      E.cy--;
+    }
     break;
+
+  case ARROW_DOWN:
   case 'j':
-    E.cy++;
+    if (E.cy != E.screen_rows - 1) {
+      E.cy++;
+    }
     break;
   }
 }
@@ -159,21 +164,47 @@ void editor_refresh_screen() {
 /**
  *,
  */
-char editor_read_key() {
+int editor_read_key() {
   int nread;
   char c;
   while ((nread = read(STDIN_FILENO, &c, 1)) != 1) {
     if (nread == -1 && errno != EAGAIN)
       die("read");
   }
-  return c;
+  if (c == '\x1b') {
+    char seq[3];
+    if (read(STDIN_FILENO, &seq[0], 1) != 1)
+      return '\x1b';
+    if (read(STDIN_FILENO, &seq[1], 1) != 1)
+      return '\x1b';
+    if (seq[0] == '[') {
+      switch (seq[1]) {
+      case 'A':
+        return ARROW_UP;
+      case 'B':
+        return ARROW_DOWN;
+      case 'C':
+        return ARROW_RIGHT;
+      case 'D':
+        return ARROW_LEFT;
+      }
+    }
+    return '\x1b';
+  } else {
+    return c;
+  }
 }
 
 /**
  *
  */
+void set_mode(int mode) { E.mode = mode; }
+
+/**
+ *
+ */
 void editor_process_keypress() {
-  char c = editor_read_key();
+  int c = editor_read_key();
 
   switch (c) {
   case CTRL_KEY('q'):
@@ -181,11 +212,28 @@ void editor_process_keypress() {
     exit(0);
     break;
 
+  case CTRL_KEY('i'):
+    set_mode(MODE_INSERT);
+    break;
+
+  case CTRL_KEY('n'):
+    set_mode(MODE_NORMAL);
+    break;
+
+  case ARROW_LEFT:
+  case ARROW_RIGHT:
+  case ARROW_UP:
+  case ARROW_DOWN:
+    editor_move_cursor(c);
+    break;
+
   case 'h':
   case 'j':
   case 'k':
   case 'l':
-    editor_move_cursor(c);
+    if (E.mode == MODE_NORMAL) {
+      editor_move_cursor(c);
+    }
     break;
   }
 }
@@ -218,25 +266,6 @@ void disable_raw_mode() {
   if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &E.orig_termios) == -1)
     die("tcsetattr");
 }
-
-/**
- *
- */
-void ab_append(struct abuf *ab, const char *s, int len) {
-  char *new = realloc(ab->b, ab->len + len);
-
-  if (new == NULL)
-    return;
-
-  memcpy(&new[ab->len], s, len);
-  ab->b = new;
-  ab->len += len;
-}
-
-/**
- *
- */
-void ab_free(struct abuf *ab) { free(ab->b); }
 
 /**
  * die
